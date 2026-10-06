@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Log in — Shop Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="auth-page">
+
+  <div class="auth-box">
+    <h1 class="auth-title">Shop Manager</h1>
+
+    <label>Email</label>
+    <input type="email" id="login-email" placeholder="you@example.com">
+
+    <label>Password</label>
+    <div class="password-wrapper">
+      <input type="password" id="login-password" placeholder="Enter your password">
+      <button type="button" class="toggle-password" data-target="login-password">
+        <span class="toggle-text">Show</span>
+      </button>
+    </div>
+
+    <div id="login-error" class="auth-error"></div>
+
+    <button id="login-btn" class="btn btn-primary btn-full">Log in</button>
+
+    <p class="auth-switch">No account? <a href="signup.html">Sign up</a></p>
+  </div>
+
+  <script src="auth.js"></script>
+  <script>
+    // Already logged in? Go straight to the dashboard.
+    if (getCurrentUser()) {
+      window.location.href = "index.html";
+    }
+
+    document.getElementById("login-btn").addEventListener("click", async () => {
+      const email = document.getElementById("login-email").value.trim().toLowerCase();
+      const password = document.getElementById("login-password").value;
+      const errorEl = document.getElementById("login-error");
+
+      if (!email || !password) {
+        errorEl.textContent = "Enter your email and password.";
+        return;
+      }
+
+      const result = await logIn(email, password);
+      if (!result.ok) {
+        errorEl.textContent = result.message;
+        return;
+      }
+
+      window.location.href = "index.html";
+    });
+  </script>
+
+</body>
+
+</html>

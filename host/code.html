@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shop Manager</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="auth.js"></script>
+  <script>
+    // Route guard: bounce to login.html if nobody is signed in
+    if (!getCurrentUser()) {
+      window.location.href = "login.html";
+    }
+  </script>
+</head>
+<body>
+
+  <header class="topbar">
+    <h1>Shop Manager</h1>
+    <button id="logout-btn" class="btn-danger" style="color:white;">Log out</button>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="products">Products</button>
+      <button class="tab-btn" data-tab="pos">Checkout</button>
+      <button class="tab-btn" data-tab="sales">Sales history</button>
+    </nav>
+  </header>
+
+  <main>
+
+    <!-- DASHBOARD -->
+    <section id="dashboard" class="tab-panel active">
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-label">Today's sales</div>
+          <div class="metric-value" id="today-sales">₦0</div>
+        </div>
+        <div class="metric-card metric-card--warning">
+          <div class="metric-label">Low stock items</div>
+          <div class="metric-value" id="low-stock-count">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Total products</div>
+          <div class="metric-value" id="total-products">0</div>
+        </div>
+      </div>
+
+      <h2>Low stock alerts</h2>
+      <div id="low-stock-list" class="low-stock-list"></div>
+    </section>
+
+    <!-- PRODUCTS -->
+    <section id="products" class="tab-panel">
+      <div class="section-header">
+        <h2>Products</h2>
+        <button id="add-product-btn" class="btn btn-primary">Add product</button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Image</th>
+            <th>Name</th>
+            <th>Price</th>
+            <th>Stock</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="products-table-body"></tbody>
+      </table>
+    </section>
+
+    <!-- POS / CHECKOUT -->
+    <section id="pos" class="tab-panel">
+      <div class="pos-layout">
+        <div class="pos-catalog">
+          <input type="text" id="pos-search" placeholder="Search product...">
+          <div id="pos-product-grid" class="pos-product-grid"></div>
+        </div>
+        <div class="pos-cart">
+          <h2>Cart</h2>
+          <div id="cart-items" class="cart-items"></div>
+          <div class="cart-total">
+            <span>Total</span>
+            <span id="cart-total">₦0</span>
+          </div>
+          <button id="checkout-btn" class="btn btn-primary btn-full">Charge</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SALES HISTORY -->
+    <section id="sales" class="tab-panel">
+      <h2>Sales history</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Items</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="sales-table-body"></tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <!-- ADD PRODUCT MODAL -->
+  <div id="product-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Add product</h2>
+      <label>Name</label>
+      <input type="text" id="modal-name" placeholder="e.g. Rice 5kg">
+      <label>Price (₦)</label>
+      <input type="number" id="modal-price" placeholder="e.g. 4000">
+      <label>Stock quantity</label>
+      <input type="number" id="modal-stock" placeholder="e.g. 20">
+      <label>Low stock threshold</label>
+      <input type="number" id="modal-threshold" placeholder="e.g. 5" value="5">
+      <label>Product image</label>
+      <input type="file" id="modal-image" accept="image/*">
+      <img id="modal-image-preview" class="image-preview hidden">
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn">Cancel</button>
+        <button id="modal-save" class="btn btn-primary">Save product</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js">
+
+    // ---------- Logout ----------
+
+document.getElementById("logout-btn").addEventListener("click", () => {
+  clearCurrentUser();
+  window.location.href = "login.html";
+});
+
+// ---------- Data layer (localStorage) ----------
+
+function loadProducts() {
+  const stored = localStorage.getItem("products");
+  if (stored) return JSON.parse(stored);
+
+  // Starter sample data so the app isn't empty on first load
+  const sample = [
+    { id: 1, name: "Rice 5kg", price: 4000, stock: 12, threshold: 5 },
+    { id: 2, name: "Detergent", price: 1500, stock: 3, threshold: 5 },
+    { id: 3, name: "Cooking Oil 1L", price: 2200, stock: 20, threshold: 5 },
+    { id: 4, name: "Bread", price: 800, stock: 0, threshold: 5 },
+  ];
+  saveProducts(sample);
+  return sample;
+}
+
+function saveProducts(products) {
+  localStorage.setItem("products", JSON.stringify(products));
+}
+
+function loadSales() {
+  const stored = localStorage.getItem("sales");
+  return stored ? JSON.parse(stored) : [];
+}
+
+function saveSales(sales) {
+  localStorage.setItem("sales", JSON.stringify(sales));
+}
+
+let products = loadProducts();
+let sales = loadSales();
+let cart = []; // { productId, name, price, qty }
+
+// ---------- Tab switching ----------
+
+document.querySelectorAll(".tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById(btn.dataset.tab).classList.add("active");
+    if (btn.dataset.tab === "dashboard") renderDashboard();
+    if (btn.dataset.tab === "products") renderProductsTable();
+    if (btn.dataset.tab === "pos") renderPosGrid();
+    if (btn.dataset.tab === "sales") renderSalesTable();
+  });
+});
+
+// ---------- Formatting helpers ----------
+
+function formatNaira(amount) {
+  return "₦" + amount.toLocaleString();
+}
+
+function stockStatus(product) {
+  if (product.stock === 0) return { label: "Out of stock", cls: "status-out" };
+  if (product.stock <= product.threshold) return { label: "Low stock", cls: "status-low" };
+  return { label: "In stock", cls: "status-ok" };
+}
+
+// ---------- Dashboard ----------
+
+function renderDashboard() {
+  const today = new Date().toDateString();
+  const todaysSales = sales.filter((s) => new Date(s.date).toDateString() === today);
+  const todaysTotal = todaysSales.reduce((sum, s) => sum + s.total, 0);
+
+  document.getElementById("today-sales").textContent = formatNaira(todaysTotal);
+  document.getElementById("total-products").textContent = products.length;
+
+  const lowStock = products.filter((p) => p.stock <= p.threshold);
+  document.getElementById("low-stock-count").textContent = lowStock.length;
+
+  const listEl = document.getElementById("low-stock-list");
+  listEl.innerHTML = "";
+  if (lowStock.length === 0) {
+    listEl.innerHTML = '<div class="empty-state">Nothing low on stock right now.</div>';
+  } else {
+    lowStock.forEach((p) => {
+      const div = document.createElement("div");
+      div.className = "low-stock-item";
+      div.innerHTML = `<span>${p.name}</span><span>${p.stock} left</span>`;
+      listEl.appendChild(div);
+    });
+  }
+}
+
+// ---------- Products table ----------
+
+function renderProductsTable() {
+  const tbody = document.getElementById("products-table-body");
+  tbody.innerHTML = "";
+
+  products.forEach((p) => {
+    const status = stockStatus(p);
+    const row = document.createElement("tr");
+    const thumb = p.image
+      ? `<img src="${p.image}" class="table-thumb" alt="${p.name}">`
+      : `<div class="table-thumb table-thumb--empty"></div>`;
+
+    row.innerHTML = `
+      <td>${thumb}</td>
+      <td>${p.name}</td>
+      <td>${formatNaira(p.price)}</td>
+      <td>${p.stock}</td>
+      <td><span class="status-pill ${status.cls}">${status.label}</span></td>
+      <td><button class="btn-danger" data-id="${p.id}">Delete</button></td>
+    `;
+    tbody.appendChild(row);
+  });
+
+  tbody.querySelectorAll(".btn-danger").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.id);
+      products = products.filter((p) => p.id !== id);
+      saveProducts(products);
+      renderProductsTable();
+    });
+  });
+}
+
+// ---------- Add product modal ----------
+
+const modal = document.getElementById("product-modal");
+
+document.getElementById("add-product-btn").addEventListener("click", () => {
+  modal.classList.remove("hidden");
+});
+
+document.getElementById("modal-cancel").addEventListener("click", () => {
+  modal.classList.add("hidden");
+});
+
+let pendingImageData = null;
+
+document.getElementById("modal-image").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    pendingImageData = reader.result; // base64 string
+    const preview = document.getElementById("modal-image-preview");
+    preview.src = pendingImageData;
+    preview.classList.remove("hidden");
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById("modal-save").addEventListener("click", () => {
+  const name = document.getElementById("modal-name").value.trim();
+  const price = Number(document.getElementById("modal-price").value);
+  const stock = Number(document.getElementById("modal-stock").value);
+  const threshold = Number(document.getElementById("modal-threshold").value) || 5;
+
+  if (!name || price <= 0) {
+    alert("Enter a product name and a price above 0.");
+    return;
+  }
+
+  const newId = products.length ? Math.max(...products.map((p) => p.id)) + 1 : 1;
+  products.push({ id: newId, name, price, stock, threshold, image: pendingImageData });
+  saveProducts(products);
+
+  document.getElementById("modal-name").value = "";
+  document.getElementById("modal-price").value = "";
+  document.getElementById("modal-stock").value = "";
+  document.getElementById("modal-threshold").value = "5";
+  document.getElementById("modal-image").value = "";
+  document.getElementById("modal-image-preview").classList.add("hidden");
+  pendingImageData = null;
+
+  modal.classList.add("hidden");
+  renderProductsTable();
+});
+
+// ---------- POS / Checkout ----------
+
+function renderPosGrid(filter = "") {
+  const grid = document.getElementById("pos-product-grid");
+  grid.innerHTML = "";
+
+  const visible = products.filter((p) =>
+    p.name.toLowerCase().includes(filter.toLowerCase())
+  );
+
+  visible.forEach((p) => {
+    const card = document.createElement("button");
+    card.className = "pos-product-card";
+    card.disabled = p.stock === 0;
+    const thumb = p.image
+      ? `<img src="${p.image}" class="pos-thumb" alt="${p.name}">`
+      : `<div class="pos-thumb pos-thumb--empty"></div>`;
+
+    card.innerHTML = `
+      ${thumb}
+      <div class="name">${p.name}</div>
+      <div class="price">${formatNaira(p.price)} · ${p.stock} left</div>
+    `;
+    card.addEventListener("click", () => addToCart(p));
+    grid.appendChild(card);
+  });
+}
+
+document.getElementById("pos-search").addEventListener("input", (e) => {
+  renderPosGrid(e.target.value);
+});
+
+function addToCart(product) {
+  const existing = cart.find((c) => c.productId === product.id);
+  const currentQty = existing ? existing.qty : 0;
+
+  if (currentQty + 1 > product.stock) {
+    alert("Not enough stock for another " + product.name + ".");
+    return;
+  }
+
+  if (existing) {
+    existing.qty += 1;
+  } else {
+    cart.push({ productId: product.id, name: product.name, price: product.price, qty: 1 });
+  }
+  renderCart();
+}
+
+function renderCart() {
+  const cartEl = document.getElementById("cart-items");
+  cartEl.innerHTML = "";
+
+  let total = 0;
+  cart.forEach((line) => {
+    total += line.price * line.qty;
+    const div = document.createElement("div");
+    div.className = "cart-line";
+    div.innerHTML = `<span>${line.name} x${line.qty}</span><span>${formatNaira(line.price * line.qty)}</span>`;
+    cartEl.appendChild(div);
+  });
+
+  document.getElementById("cart-total").textContent = formatNaira(total);
+}
+
+document.getElementById("checkout-btn").addEventListener("click", () => {
+  if (cart.length === 0) {
+    alert("Cart is empty. Add a product first.");
+    return;
+  }
+
+  // Deduct stock
+  cart.forEach((line) => {
+    const product = products.find((p) => p.id === line.productId);
+    product.stock -= line.qty;
+  });
+  saveProducts(products);
+
+  // Record sale
+  const total = cart.reduce((sum, l) => sum + l.price * l.qty, 0);
+  const itemsSummary = cart.map((l) => `${l.name} x${l.qty}`).join(", ");
+  sales.push({ date: new Date().toISOString(), items: itemsSummary, total });
+  saveSales(sales);
+
+  cart = [];
+  renderCart();
+  renderPosGrid(document.getElementById("pos-search").value);
+  alert("Sale recorded. Total: " + formatNaira(total));
+});
+
+// ---------- Sales history ----------
+
+function renderSalesTable() {
+  const tbody = document.getElementById("sales-table-body");
+  tbody.innerHTML = "";
+
+  if (sales.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" class="empty-state">No sales recorded yet.</td></tr>';
+    return;
+  }
+
+  [...sales].reverse().forEach((s) => {
+    const row = document.createElement("tr");
+    const date = new Date(s.date).toLocaleString();
+    row.innerHTML = `<td>${date}</td><td>${s.items}</td><td>${formatNaira(s.total)}</td>`;
+    tbody.appendChild(row);
+  });
+}
+
+// ---------- Initial render ----------
+
+renderDashboard();
+renderProductsTable();
+renderPosGrid();
+renderCart();
+renderSalesTable();
+  </script>
+
+
+  
+</body>
+</html>

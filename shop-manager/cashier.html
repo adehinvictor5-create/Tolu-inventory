@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Checkout — Shop Manager</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="auth.js"></script>
+  <script>requireRole("cashier", "admin");</script>
+</head>
+
+<body>
+
+  <header class="topbar">
+   <div style="display: flex; align-items: center;"> 
+    <img src="./image/f54931d9-8885-4333-8ec8-33df6c113f8c.png" alt="img">
+    <h1 style="padding-left: 20px;">Tolu inventory</h1>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="pos">Checkout</button>
+      <button class="tab-btn" data-tab="mysales">My sales</button>
+    </nav>
+    <div class="user-box">
+      <span id="who"></span><span class="role-badge" id="role"></span>
+      <a class="btn hidden" id="admin-link" href="admin.html">Admin panel</a>
+      <button class="btn" onclick="logout()">Log out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="pos" class="tab-panel active">
+      <div class="pos-layout">
+        <div class="pos-catalog">
+          <input type="text" id="pos-search" placeholder="Search product...">
+          <div id="pos-grid" class="pos-product-grid"></div>
+        </div>
+        <div class="pos-cart">
+          <div class="cart-header">
+            <h2>Cart</h2>
+            <button id="clear-cart-btn" class="btn-link">Clear</button>
+          </div>
+          <div id="cart-items" class="cart-items"></div>
+          <div class="cart-total"><span>Total</span><span id="cart-total">₦0</span></div>
+          <button id="checkout-btn" class="btn btn-primary btn-full">Charge</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="mysales" class="tab-panel">
+      <h2>My sales today: <span id="my-total">₦0</span></h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Items</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="mysales-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script src="store.js"></script>
+  <script>
+    const me = getCurrentUser();
+    const $ = (id) => document.getElementById(id);
+    $("who").textContent = me.name;
+    $("role").textContent = me.role;
+    if (me.role === "admin") $("admin-link").classList.remove("hidden");
+    let products = loadProducts();
+    let cart = [];
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn, .tab-panel").forEach((e) => e.classList.remove("active"));
+        btn.classList.add("active");
+        $(btn.dataset.tab).classList.add("active");
+        products = loadProducts();
+        renderGrid(); renderMySales();
+      });
+    });
+
+    function renderGrid() {
+      const q = $("pos-search").value.toLowerCase();
+      $("pos-grid").innerHTML = products
+        .filter((p) => p.name.toLowerCase().includes(q))
+        .map((p) => {
+          const thumb = p.image
+            ? `<img src="${p.image}" class="pos-thumb">`
+            : `<div class="pos-thumb pos-thumb--empty"></div>`;
+          return `<button class="pos-product-card" data-id="${p.id}" ${p.stock === 0 ? "disabled" : ""}>
+            ${thumb}
+            <div class="name">${esc(p.name)}</div>
+            <div class="price">${formatNaira(p.price)} · ${p.stock} left</div></button>`;
+        }).join("")
+        || '<div class="empty-state">No products found.</div>';
+    }
+    $("pos-search").addEventListener("input", renderGrid);
+
+    $("pos-grid").addEventListener("click", (e) => {
+      const card = e.target.closest(".pos-product-card");
+      if (!card) return;
+      changeQty(Number(card.dataset.id), 1);
+    });
+
+    function changeQty(id, delta) {
+      const p = products.find((x) => x.id === id);
+      let line = cart.find((c) => c.productId === id);
+      const newQty = (line ? line.qty : 0) + delta;
+      if (newQty > p.stock) return alert("Not enough stock for " + p.name + ".");
+      if (!line && newQty > 0) cart.push((line = { productId: id, name: p.name, price: p.price, image: p.image, qty: 0 }));
+      if (line) line.qty = newQty;
+      cart = cart.filter((c) => c.qty > 0);
+      renderCart();
+    }
+
+    function renderCart() {
+      $("cart-items").innerHTML = cart.map((l) => {
+        const thumb = l.image
+          ? `<img src="${l.image}" class="cart-thumb">`
+          : `<div class="cart-thumb cart-thumb--empty"></div>`;
+        return `<div class="cart-line">
+          ${thumb}
+          <span>${esc(l.name)}</span>
+          <span><button class="qty-btn" data-id="${l.productId}" data-d="-1">−</button> ${l.qty}
+          <button class="qty-btn" data-id="${l.productId}" data-d="1">+</button></span>
+          <span>${formatNaira(l.price * l.qty)}</span></div>`;
+      }).join("")
+        || '<div class="empty-state">Cart is empty.</div>';
+      $("cart-total").textContent = formatNaira(cart.reduce((t, l) => t + l.price * l.qty, 0));
+    }
+    $("cart-items").addEventListener("click", (e) => {
+      if (e.target.dataset.d) changeQty(Number(e.target.dataset.id), Number(e.target.dataset.d));
+    });
+
+    $("clear-cart-btn").addEventListener("click", () => {
+      if (!cart.length) return;
+      if (confirm("Clear the whole cart? This can't be undone.")) {
+        cart = [];
+        renderCart();
+      }
+    });
+
+    $("checkout-btn").addEventListener("click", () => {
+      if (!cart.length) return alert("Cart is empty. Add a product first.");
+
+      // Re-load fresh stock in case it changed in another tab
+      products = loadProducts();
+      for (const l of cart) {
+        const p = products.find((x) => x.id === l.productId);
+        if (!p || p.stock < l.qty) {
+          alert("Stock changed for " + l.name + ". Please review your cart.");
+          cart = []; renderCart(); renderGrid();
+          return;
+        }
+      }
+      cart.forEach((l) => { products.find((x) => x.id === l.productId).stock -= l.qty; });
+      saveProducts(products);
+
+      const total = cart.reduce((t, l) => t + l.price * l.qty, 0);
+      const sales = loadSales();
+      sales.push({
+        id: Date.now(), date: new Date().toISOString(),
+        cashier: me.name, cashierEmail: me.email,
+        items: cart.map((l) => ({ name: l.name, qty: l.qty, price: l.price })), total,
+      });
+      saveSales(sales);
+
+      cart = [];
+      renderCart(); renderGrid();
+      alert("Sale recorded. Total: " + formatNaira(total));
+    });
+
+    function renderMySales() {
+      const mine = loadSales().filter((s) => s.cashierEmail === me.email && isToday(s.date)).reverse();
+      $("my-total").textContent = formatNaira(mine.reduce((t, s) => t + s.total, 0));
+      $("mysales-body").innerHTML = mine.map((s) =>
+        `<tr><td>${new Date(s.date).toLocaleTimeString()}</td><td>${saleItemsText(s)}</td><td>${formatNaira(s.total)}</td></tr>`
+      ).join("") || '<tr><td colspan="3" class="empty-state">No sales yet today.</td></tr>';
+    }
+
+    renderGrid(); renderCart(); renderMySales();
+  </script>
+</body>
+
+</html>

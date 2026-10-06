@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tolu inventory</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="auth.js"></script>
+  <script>requireRole("admin");</script>
+</head>
+
+<body>
+  <header class="topbar">
+    <div style="display: flex; align-items: center;">
+    <img src="./image/f54931d9-8885-4333-8ec8-33df6c113f8c.png" alt="img">
+    <h1 style="padding-left: 12px;">Tolu inventory</h1>
+    </div>
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+      <button class="tab-btn" data-tab="products">Products</button>
+      <button class="tab-btn" data-tab="sales">All sales</button>
+      <button class="tab-btn" data-tab="users">Users</button>
+    </nav>
+    <div class="user-box">
+      <span id="who"></span><span class="role-badge">admin</span>
+      <a class="btn" href="cashier.html">Go to checkout</a>
+      <button class="btn" onclick="logout()">Log out</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="dashboard" class="tab-panel active">
+      <div class="metric-grid">
+        <div class="metric-card">
+          <div class="metric-label">Today's sales</div>
+          <div class="metric-value" id="today-sales">₦0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Total revenue</div>
+          <div class="metric-value" id="total-revenue">₦0</div>
+        </div>
+        <div class="metric-card metric-card--warning">
+          <div class="metric-label">Low stock items</div>
+          <div class="metric-value" id="low-stock-count">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Total products</div>
+          <div class="metric-value" id="total-products">0</div>
+        </div>
+      </div>
+      <h2>Low stock alerts</h2>
+      <div id="low-stock-list" class="low-stock-list"></div>
+    </section>
+
+    <section id="products" class="tab-panel">
+      <div class="section-header">
+        <h2>Products</h2>
+        <button id="add-product-btn" class="btn btn-primary">Add product</button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Image</th>
+            <th>Name</th>
+            <th>Price</th>
+            <th>Stock</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="products-body"></tbody>
+      </table>
+    </section>
+
+    <section id="sales" class="tab-panel">
+      <h2>All sales</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Cashier</th>
+            <th>Items</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody id="sales-body"></tbody>
+      </table>
+    </section>
+
+    <section id="users" class="tab-panel">
+      <h2>Users</h2>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Email</th>
+            <th>Role</th>
+          </tr>
+        </thead>
+        <tbody id="users-body"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <div id="product-modal" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="modal-title">Add product</h2>
+      <input type="hidden" id="modal-id">
+      <label>Name</label><input type="text" id="modal-name" placeholder="e.g. Rice 5kg">
+      <label>Price (₦)</label><input type="number" id="modal-price" min="1" placeholder="e.g. 4000">
+      <label>Stock quantity</label><input type="number" id="modal-stock" min="0" placeholder="e.g. 20">
+      <label>Low stock threshold</label><input type="number" id="modal-threshold" min="0" value="5">
+      <div id="modal-error" class="auth-error" style="color:var(--danger);font-size:13px;min-height:18px"></div>
+      <label>Product image</label>
+      <input type="file" id="modal-image" accept="image/*">
+      <img id="modal-image-preview" class="image-preview hidden">
+      <div class="modal-actions">
+        <button id="modal-cancel" class="btn">Cancel</button>
+        <button id="modal-save" class="btn btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="store.js"></script>
+  <script>
+    const me = getCurrentUser();
+    document.getElementById("who").textContent = me.name;
+    let products = loadProducts();
+    let pendingImageData = null;
+    const $ = (id) => document.getElementById(id);
+
+    // ---- tabs ----
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn, .tab-panel").forEach((e) => e.classList.remove("active"));
+        btn.classList.add("active");
+        $(btn.dataset.tab).classList.add("active");
+        renderAll();
+      });
+    });
+
+    // ---- dashboard ----
+    function renderDashboard() {
+      const sales = loadSales();
+      const low = products.filter((p) => p.stock <= p.threshold);
+      $("today-sales").textContent = formatNaira(sales.filter((s) => isToday(s.date)).reduce((t, s) => t + s.total, 0));
+      $("total-revenue").textContent = formatNaira(sales.reduce((t, s) => t + s.total, 0));
+      $("total-products").textContent = products.length;
+      $("low-stock-count").textContent = low.length;
+      $("low-stock-list").innerHTML = low.length
+        ? low.map((p) => `<div class="low-stock-item"><span>${esc(p.name)}</span><span>${p.stock} left</span></div>`).join("")
+        : '<div class="empty-state">Nothing low on stock right now.</div>';
+    }
+
+    // ---- products ----
+    function renderProducts() {
+      $("products-body").innerHTML = products.map((p) => {
+        const st = stockStatus(p);
+        const thumb = p.image
+          ? `<img src="${p.image}" class="table-thumb">`
+          : `<div class="table-thumb table-thumb--empty"></div>`;
+        return `<tr><td>${thumb}</td><td>${esc(p.name)}</td><td>${formatNaira(p.price)}</td><td>${p.stock}</td>
+          <td><span class="status-pill ${st.cls}">${st.label}</span></td>
+          <td><button class="btn-edit" data-edit="${p.id}">Edit</button>
+              <button class="btn-danger" data-del="${p.id}">Delete</button></td></tr>`;
+      }).join("") || '<tr><td colspan="6" class="empty-state">No products yet.</td></tr>';
+    }
+
+    $("products-body").addEventListener("click", (e) => {
+      const edit = e.target.dataset.edit, del = e.target.dataset.del;
+      if (edit) openModal(products.find((p) => p.id === Number(edit)));
+      if (del && confirm("Delete this product?")) {
+        products = products.filter((p) => p.id !== Number(del));
+        saveProducts(products);
+        renderAll();
+      }
+    });
+
+    function openModal(p) {
+      $("modal-title").textContent = p ? "Edit product" : "Add product";
+      $("modal-id").value = p ? p.id : "";
+      $("modal-name").value = p ? p.name : "";
+      $("modal-price").value = p ? p.price : "";
+      $("modal-stock").value = p ? p.stock : "";
+      $("modal-threshold").value = p ? p.threshold : 5;
+      $("modal-error").textContent = "";
+      $("modal-image").value = "";
+
+      pendingImageData = p ? p.image : null;
+      const preview = $("modal-image-preview");
+      if (pendingImageData) {
+        preview.src = pendingImageData;
+        preview.classList.remove("hidden");
+      } else {
+        preview.classList.add("hidden");
+      }
+
+      $("product-modal").classList.remove("hidden");
+    }
+    $("add-product-btn").addEventListener("click", () => openModal(null));
+    $("modal-cancel").addEventListener("click", () => $("product-modal").classList.add("hidden"));
+
+    $("modal-image").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        pendingImageData = reader.result;
+        $("modal-image-preview").src = pendingImageData;
+        $("modal-image-preview").classList.remove("hidden");
+      };
+      reader.readAsDataURL(file);
+    });
+
+    $("modal-save").addEventListener("click", () => {
+      const name = $("modal-name").value.trim();
+      const price = Number($("modal-price").value);
+      const stock = Number($("modal-stock").value);
+      const threshold = Number($("modal-threshold").value);
+      const id = $("modal-id").value;
+
+      if (!name) return ($("modal-error").textContent = "Enter a product name.");
+      if (!(price > 0)) return ($("modal-error").textContent = "Price must be above 0.");
+      if (!Number.isInteger(stock) || stock < 0) return ($("modal-error").textContent = "Stock must be a whole number, 0 or more.");
+      if (!Number.isInteger(threshold) || threshold < 0) return ($("modal-error").textContent = "Threshold must be a whole number, 0 or more.");
+
+      if (id) {
+        const p = products.find((x) => x.id === Number(id));
+        Object.assign(p, { name, price, stock, threshold, image: pendingImageData });
+      } else {
+        const newId = products.length ? Math.max(...products.map((p) => p.id)) + 1 : 1;
+        products.push({ id: newId, name, price, stock, threshold, image: pendingImageData });
+      }
+      saveProducts(products);
+      $("product-modal").classList.add("hidden");
+      renderAll();
+    });
+
+    // ---- sales ----
+    function renderSales() {
+      const sales = [...loadSales()].reverse();
+      $("sales-body").innerHTML = sales.map((s) =>
+        `<tr><td>${new Date(s.date).toLocaleString()}</td><td>${esc(s.cashier)}</td><td>${saleItemsText(s)}</td><td>${formatNaira(s.total)}</td></tr>`
+      ).join("") || '<tr><td colspan="4" class="empty-state">No sales recorded yet.</td></tr>';
+    }
+
+    // ---- users ----
+    function renderUsers() {
+      $("users-body").innerHTML = loadUsers().map((u) => {
+        const self = u.email === me.email;
+        return `<tr><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>
+          <select data-email="${esc(u.email)}" ${self ? "disabled" : ""}>
+            <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
+            <option value="cashier" ${u.role === "cashier" ? "selected" : ""}>Cashier</option>
+          </select>${self ? " (you)" : ""}</td></tr>`;
+      }).join("");
+    }
+    $("users-body").addEventListener("change", (e) => {
+      if (e.target.tagName !== "SELECT") return;
+      const users = loadUsers();
+      const u = users.find((x) => x.email === e.target.dataset.email);
+      u.role = e.target.value;
+      saveUsers(users);
+    });
+
+    function renderAll() {
+      products = loadProducts();
+      renderDashboard(); renderProducts(); renderSales(); renderUsers();
+    }
+    renderAll();
+  </script>
+</body>
+
+</html>
